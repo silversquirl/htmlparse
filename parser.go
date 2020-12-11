@@ -10,41 +10,40 @@ import (
 )
 
 func Parse(parent *html.Node, text []byte) error {
-	p := &parser{}
-	_, err := p.parse(parent, text, true)
-	return err
+	p := &parser{text: text}
+	return p.parse(parent, true)
 }
 
 type parser struct {
 	arena
+	text     []byte
 	lowerBuf []byte
 }
 
 // TODO: position information in errors
-func (p *parser) parse(parent *html.Node, text []byte, root bool) (rest []byte, err error) {
+func (p *parser) parse(parent *html.Node, root bool) error {
 	for {
-		idx := bytes.IndexByte(text, '<')
+		idx := bytes.IndexByte(p.text, '<')
 		if idx < 0 {
 			break
 		}
 
-		// Process preceding text
-		p.textNode(parent, text[:idx])
-		text = text[idx:]
+		// Process preceding p.text
+		p.textNode(parent, p.text[:idx])
+		p.text = p.text[idx:]
 
-		if len(text) < 2 {
-			return nil, errors.New("Unexpected end of file in opening tag")
+		if len(p.text) < 2 {
+			return errors.New("Unexpected end of file in opening tag")
 		}
 
-		switch text[1] {
+		switch p.text[1] {
 		default:
 			// Opening tag
-			node, selfClosing, rest, err := p.parseStartTag(text)
+			node, selfClosing, err := p.parseStartTag()
 			if err != nil {
-				return nil, err
+				return err
 			}
 
-			text = rest
 			parent.AppendChild(node)
 
 			if selfClosing {
@@ -57,16 +56,16 @@ func (p *parser) parse(parent *html.Node, text []byte, root bool) (rest []byte, 
 			case catVoid:
 				// Do nothing
 			case catRaw:
-				text, err = p.parseRaw(node, text, false)
+				err = p.parseRaw(node, false)
 			case catEscapableRaw:
-				text, err = p.parseRaw(node, text, true)
+				err = p.parseRaw(node, true)
 			case catNormal, catTemplate, catForeign:
-				text, err = p.parse(node, text, false)
+				err = p.parse(node, false)
 			default:
 				panic("Invalid category")
 			}
 			if err != nil {
-				return nil, err
+				return err
 			}
 
 		case '/':
@@ -76,41 +75,41 @@ func (p *parser) parse(parent *html.Node, text []byte, root bool) (rest []byte, 
 				start = nil
 			}
 
-			ok, rest, err := p.parseEndTag(start, text)
+			ok, err := p.parseEndTag(start)
 			if err != nil {
-				return nil, err
+				return err
 			}
 
 			if ok {
-				return rest, nil
+				return nil
 			} else {
-				return nil, fmt.Errorf("Unclosed %q element", parent.Data)
+				return fmt.Errorf("Unclosed %q element", parent.Data)
 			}
 
 		case '!':
-			text = text[2:]
-			if len(text) == 0 {
-				return nil, errors.New("Unexpected end of file in comment tag")
+			p.text = p.text[2:]
+			if len(p.text) == 0 {
+				return errors.New("Unexpected end of file in comment tag")
 			}
 			node := p.newNode()
 			node.Type = html.CommentNode
-			if bytes.HasPrefix(text, []byte("--")) {
+			if bytes.HasPrefix(p.text, []byte("--")) {
 				// Well-formed comment
-				text = text[2:]
-				idx = bytes.Index(text, []byte("-->"))
-				node.Data, text = string(text[:idx]), text[idx+3:]
+				p.text = p.text[2:]
+				idx = bytes.Index(p.text, []byte("-->"))
+				node.Data, p.text = string(p.text[:idx]), p.text[idx+3:]
 			} else {
-				doctype, _, rest := p.nextIdent(text)
+				doctype, _, rest := p.nextIdent(p.text)
 				if doctype == "doctype" {
 					// DOCTYPE
-					text = skipSpace(rest)
-					idx = bytes.IndexByte(text, '>')
+					p.text = skipSpace(rest)
+					idx = bytes.IndexByte(p.text, '>')
 					node.Type = html.DoctypeNode
-					node.Data, text = string(text[:idx]), text[idx+1:]
+					node.Data, p.text = string(p.text[:idx]), p.text[idx+1:]
 				} else {
 					// Malformed comment
-					idx = bytes.IndexByte(text, '>')
-					node.Data, text = string(text[:idx]), text[idx+1:]
+					idx = bytes.IndexByte(p.text, '>')
+					node.Data, p.text = string(p.text[:idx]), p.text[idx+1:]
 				}
 			}
 			parent.AppendChild(node)
@@ -118,33 +117,34 @@ func (p *parser) parse(parent *html.Node, text []byte, root bool) (rest []byte, 
 	}
 
 	if !root {
-		return nil, fmt.Errorf("Unclosed %q element", parent.Data)
+		return fmt.Errorf("Unclosed %q element", parent.Data)
 	}
-	p.textNode(parent, text)
-	return nil, nil
+	p.textNode(parent, p.text)
+	return nil
 }
 
-func (p *parser) parseRaw(parent *html.Node, text []byte, escapable bool) (rest []byte, err error) {
+func (p *parser) parseRaw(parent *html.Node, escapable bool) error {
 	buf := &bytes.Buffer{}
 	for {
-		idx := bytes.IndexByte(text, '<')
+		idx := bytes.IndexByte(p.text, '<')
 		if idx < 0 {
-			return nil, fmt.Errorf("Unclosed %q element", parent.Data)
+			return fmt.Errorf("Unclosed %q element", parent.Data)
 		}
 
-		// Process preceding text
-		buf.Write(text[:idx])
-		text = text[idx:]
+		// Process preceding p.text
+		buf.Write(p.text[:idx])
+		p.text = p.text[idx:]
 
-		if len(text) < 2 {
-			return nil, errors.New("Unexpected end of file in opening tag")
+		if len(p.text) < 2 {
+			return errors.New("Unexpected end of file in opening tag")
 		}
 
-		if text[1] == '/' {
+		if p.text[1] == '/' {
 			// Check for a closing tag
-			ok, rest, err := p.parseEndTag(parent, text)
+			oldText := p.text
+			ok, err := p.parseEndTag(parent)
 			if err != nil {
-				return nil, err
+				return err
 			}
 
 			if ok {
@@ -156,20 +156,20 @@ func (p *parser) parseRaw(parent *html.Node, text []byte, escapable bool) (rest 
 					node.Data = buf.String()
 					parent.AppendChild(node)
 				}
-				return rest, nil
+				return nil
+			} else {
+				// Reset the text
+				p.text = oldText
 			}
 		}
 
-		buf.Write(text[:2])
-		text = text[2:]
+		buf.Write(p.text[:2])
+		p.text = p.text[2:]
 	}
 }
 
 func (p *parser) textNode(parent *html.Node, text []byte) {
 	if len(text) > 0 {
-		// XXX: this copies the text twice, would be nice to reduce that
-		// Unfortunately, fixing that would require writing an HTML unescaper, which sounds not very fun
-		// Either way, it's unlikely to be a problem unless a page has megabytes of uinterrupted text
 		node := p.newNode()
 		node.Type = html.TextNode
 		node.Data = html.UnescapeString(string(text))
@@ -177,11 +177,12 @@ func (p *parser) textNode(parent *html.Node, text []byte) {
 	}
 }
 
-func (p *parser) parseStartTag(text []byte) (node *html.Node, selfClosing bool, rest []byte, err error) {
-	text = skipSpace(text[1:])
-	elemS, elemA, text := p.nextIdent(text)
+func (p *parser) parseStartTag() (node *html.Node, selfClosing bool, err error) {
+	p.text = skipSpace(p.text[1:])
+	elemS, elemA, rest := p.nextIdent(p.text)
+	p.text = rest
 	if elemS == "" {
-		return nil, false, nil, fmt.Errorf("Unexpected %q in opening tag", text[0])
+		return nil, false, fmt.Errorf("Unexpected %q in opening tag", p.text[0])
 	}
 
 	// Construct node
@@ -191,22 +192,22 @@ func (p *parser) parseStartTag(text []byte) (node *html.Node, selfClosing bool, 
 	node.DataAtom = elemA
 
 	// Attributes
-	text = skipSpace(text)
-	for text[0] != '/' && text[0] != '>' {
+	p.text = skipSpace(p.text)
+	for p.text[0] != '/' && p.text[0] != '>' {
 		var name, val string
 		// Name
-		name, _, text = p.nextIdent(text)
+		name, _, p.text = p.nextIdent(p.text)
 		if name == "" {
-			return nil, false, nil, fmt.Errorf("Unexpected %q in opening %q tag", text[0], node.Data)
+			return nil, false, fmt.Errorf("Unexpected %q in opening %q tag", p.text[0], node.Data)
 		}
 
 		// Value
-		text = skipSpace(text)
-		if text[0] == '=' {
-			text = skipSpace(text[1:])
-			val, text = p.nextValue(text)
+		p.text = skipSpace(p.text)
+		if p.text[0] == '=' {
+			p.text = skipSpace(p.text[1:])
+			val, p.text = p.nextValue(p.text)
 		}
-		text = skipSpace(text)
+		p.text = skipSpace(p.text)
 
 		// Construct attribute
 		node.Attr = append(node.Attr, html.Attribute{
@@ -214,41 +215,42 @@ func (p *parser) parseStartTag(text []byte) (node *html.Node, selfClosing bool, 
 			Val: val,
 		})
 
-		text = skipSpace(text)
+		p.text = skipSpace(p.text)
 	}
 
-	if text[0] == '/' {
+	if p.text[0] == '/' {
 		selfClosing = true
 
-		text = skipSpace(text[1:])
-		if text[0] != '>' {
-			return nil, false, nil, fmt.Errorf("Unexpected '/' in opening %q tag", node.Data)
+		p.text = skipSpace(p.text[1:])
+		if p.text[0] != '>' {
+			return nil, false, fmt.Errorf("Unexpected '/' in opening %q tag", node.Data)
 		}
 	}
 	// Skip over '>'
-	text = text[1:]
+	p.text = p.text[1:]
 
-	return node, selfClosing, text, nil
+	return node, selfClosing, nil
 }
 
-func (p *parser) parseEndTag(start *html.Node, text []byte) (ok bool, rest []byte, err error) {
-	text = text[2:]
-	elemS, elemA, text := p.nextIdent(text)
+func (p *parser) parseEndTag(start *html.Node) (ok bool, err error) {
+	p.text = p.text[2:]
+	elemS, elemA, rest := p.nextIdent(p.text)
+	p.text = rest
 	if elemS == "" {
-		return false, nil, fmt.Errorf("Unexpected %q in closing tag", text[0])
+		return false, fmt.Errorf("Unexpected %q in closing tag", p.text[0])
 	}
 	if start == nil || elemA != start.DataAtom || (elemA == 0 && elemS != start.Data) {
-		return false, nil, nil
+		return false, nil
 	}
 
-	text = skipSpace(text)
-	if text[0] != '>' {
-		return false, nil, fmt.Errorf("Unexpected %q in closing %q tag", text[0], elemS)
+	p.text = skipSpace(p.text)
+	if p.text[0] != '>' {
+		return false, fmt.Errorf("Unexpected %q in closing %q tag", p.text[0], elemS)
 	}
 	// Skip over '>'
-	text = text[1:]
+	p.text = p.text[1:]
 
-	return true, text, nil
+	return true, nil
 }
 
 func whitespaceF(r rune) bool {
