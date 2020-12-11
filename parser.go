@@ -10,12 +10,17 @@ import (
 )
 
 func Parse(parent *html.Node, text []byte) error {
-	_, err := parse(parent, text, true)
+	p := &parser{}
+	_, err := p.parse(parent, text, true)
 	return err
 }
 
+type parser struct {
+	arena
+}
+
 // TODO: position information in errors
-func parse(parent *html.Node, text []byte, root bool) (rest []byte, err error) {
+func (p *parser) parse(parent *html.Node, text []byte, root bool) (rest []byte, err error) {
 	for {
 		idx := bytes.IndexByte(text, '<')
 		if idx < 0 {
@@ -23,7 +28,7 @@ func parse(parent *html.Node, text []byte, root bool) (rest []byte, err error) {
 		}
 
 		// Process preceding text
-		textNode(parent, text[:idx])
+		p.textNode(parent, text[:idx])
 		text = text[idx:]
 
 		if len(text) < 2 {
@@ -33,7 +38,7 @@ func parse(parent *html.Node, text []byte, root bool) (rest []byte, err error) {
 		switch text[1] {
 		default:
 			// Opening tag
-			node, selfClosing, rest, err := parseStartTag(text)
+			node, selfClosing, rest, err := p.parseStartTag(text)
 			if err != nil {
 				return nil, err
 			}
@@ -51,11 +56,11 @@ func parse(parent *html.Node, text []byte, root bool) (rest []byte, err error) {
 			case catVoid:
 				// Do nothing
 			case catRaw:
-				text, err = parseRaw(node, text, false)
+				text, err = p.parseRaw(node, text, false)
 			case catEscapableRaw:
-				text, err = parseRaw(node, text, true)
+				text, err = p.parseRaw(node, text, true)
 			case catNormal, catTemplate, catForeign:
-				text, err = parse(node, text, false)
+				text, err = p.parse(node, text, false)
 			default:
 				panic("Invalid category")
 			}
@@ -70,7 +75,7 @@ func parse(parent *html.Node, text []byte, root bool) (rest []byte, err error) {
 				start = nil
 			}
 
-			ok, rest, err := parseEndTag(start, text)
+			ok, rest, err := p.parseEndTag(start, text)
 			if err != nil {
 				return nil, err
 			}
@@ -86,7 +91,8 @@ func parse(parent *html.Node, text []byte, root bool) (rest []byte, err error) {
 			if len(text) == 0 {
 				return nil, errors.New("Unexpected end of file in comment tag")
 			}
-			node := &html.Node{Type: html.CommentNode}
+			node := p.newNode()
+			node.Type = html.CommentNode
 			if bytes.HasPrefix(text, []byte("--")) {
 				// Well-formed comment
 				text = text[2:]
@@ -113,11 +119,11 @@ func parse(parent *html.Node, text []byte, root bool) (rest []byte, err error) {
 	if !root {
 		return nil, fmt.Errorf("Unclosed %q element", parent.Data)
 	}
-	textNode(parent, text)
+	p.textNode(parent, text)
 	return nil, nil
 }
 
-func parseRaw(parent *html.Node, text []byte, escapable bool) (rest []byte, err error) {
+func (p *parser) parseRaw(parent *html.Node, text []byte, escapable bool) (rest []byte, err error) {
 	buf := &bytes.Buffer{}
 	for {
 		idx := bytes.IndexByte(text, '<')
@@ -135,16 +141,19 @@ func parseRaw(parent *html.Node, text []byte, escapable bool) (rest []byte, err 
 
 		if text[1] == '/' {
 			// Check for a closing tag
-			ok, rest, err := parseEndTag(parent, text)
+			ok, rest, err := p.parseEndTag(parent, text)
 			if err != nil {
 				return nil, err
 			}
 
 			if ok {
 				if escapable {
-					textNode(parent, buf.Bytes())
+					p.textNode(parent, buf.Bytes())
 				} else if buf.Len() > 0 {
-					parent.AppendChild(&html.Node{Type: html.TextNode, Data: buf.String()})
+					node := p.newNode()
+					node.Type = html.TextNode
+					node.Data = buf.String()
+					parent.AppendChild(node)
 				}
 				return rest, nil
 			}
@@ -155,17 +164,19 @@ func parseRaw(parent *html.Node, text []byte, escapable bool) (rest []byte, err 
 	}
 }
 
-func textNode(parent *html.Node, text []byte) {
+func (p *parser) textNode(parent *html.Node, text []byte) {
 	if len(text) > 0 {
 		// XXX: this copies the text twice, would be nice to reduce that
 		// Unfortunately, fixing that would require writing an HTML unescaper, which sounds not very fun
 		// Either way, it's unlikely to be a problem unless a page has megabytes of uinterrupted text
-		plainText := html.UnescapeString(string(text))
-		parent.AppendChild(&html.Node{Type: html.TextNode, Data: plainText})
+		node := p.newNode()
+		node.Type = html.TextNode
+		node.Data = html.UnescapeString(string(text))
+		parent.AppendChild(node)
 	}
 }
 
-func parseStartTag(text []byte) (node *html.Node, selfClosing bool, rest []byte, err error) {
+func (p *parser) parseStartTag(text []byte) (node *html.Node, selfClosing bool, rest []byte, err error) {
 	text = skipSpace(text[1:])
 	elemS, elemA, text := nextIdent(text)
 	if elemS == "" {
@@ -173,7 +184,8 @@ func parseStartTag(text []byte) (node *html.Node, selfClosing bool, rest []byte,
 	}
 
 	// Construct node
-	node = &html.Node{Type: html.ElementNode}
+	node = p.newNode()
+	node.Type = html.ElementNode
 	node.Data = elemS
 	node.DataAtom = elemA
 
@@ -218,7 +230,7 @@ func parseStartTag(text []byte) (node *html.Node, selfClosing bool, rest []byte,
 	return node, selfClosing, text, nil
 }
 
-func parseEndTag(start *html.Node, text []byte) (ok bool, rest []byte, err error) {
+func (p *parser) parseEndTag(start *html.Node, text []byte) (ok bool, rest []byte, err error) {
 	text = text[2:]
 	elemS, elemA, text := nextIdent(text)
 	if elemS == "" {
