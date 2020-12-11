@@ -36,7 +36,7 @@ func TestParseElement(t *testing.T) {
 	testParseRen(t, `
 		<html>
 			<head>
-				<text>Hello, world!</text>
+				<title>Hello, world!</title>
 			</head>
 			<body>
 				<h1>foo bar</h1>
@@ -54,4 +54,25 @@ func TestAttributes(t *testing.T) {
 	testParseRen(t, `<a href=foo class=bar></a>`, `<a href="foo" class="bar"></a>`)
 	testParseRen(t, `<a href='foo' class='bar baz'></a>`, `<a href="foo" class="bar baz"></a>`)
 	testParseRen(t, `<a href="foo" class="bar baz"></a>`, "")
+}
+
+func TestEscape(t *testing.T) {
+	testParseRen(t, `& &amp; " &#34; " &quot;`, `&amp; &amp; &#34; &#34; &#34; &#34;`)
+	// HTML escapes are stupid btw
+	testParseRen(t, `&amp &amp; &AMP; &alpha &alpha; &ALPHA;`, `&amp; &amp; &amp; &amp;alpha α &amp;ALPHA;`)
+}
+
+func TestVoid(t *testing.T) {
+	void := `<area><base><br><col><embed><hr><img><input><link><meta><param><source><track><wbr>`
+	voidSC := `<area/><base/><br/><col/><embed/><hr/><img/><input/><link/><meta/><param/><source/><track/><wbr/>`
+	testParseRen(t, void, voidSC)
+	testParseRen(t, voidSC, "")
+}
+func TestRawText(t *testing.T) {
+	testParseRen(t, `<script>a<B>"c&dquot;</script>`, "")
+	testParseRen(t, `<style>a<B>'c&squot;</style>`, "")
+}
+func TestEscapableRawText(t *testing.T) {
+	testParseRen(t, `<textarea>a<B>"c&quot;</textarea>`, `<textarea>a&lt;B&gt;&#34;c&#34;</textarea>`)
+	testParseRen(t, `<title>a<B>'c&apos;</title>`, `<title>a&lt;B&gt;&#39;c&#39;</title>`)
 }
