@@ -17,6 +17,7 @@ func Parse(parent *html.Node, text []byte) error {
 
 type parser struct {
 	arena
+	lowerBuf []byte
 }
 
 // TODO: position information in errors
@@ -99,7 +100,7 @@ func (p *parser) parse(parent *html.Node, text []byte, root bool) (rest []byte, 
 				idx = bytes.Index(text, []byte("-->"))
 				node.Data, text = string(text[:idx]), text[idx+3:]
 			} else {
-				doctype, _, rest := nextIdent(text)
+				doctype, _, rest := p.nextIdent(text)
 				if doctype == "doctype" {
 					// DOCTYPE
 					text = skipSpace(rest)
@@ -178,7 +179,7 @@ func (p *parser) textNode(parent *html.Node, text []byte) {
 
 func (p *parser) parseStartTag(text []byte) (node *html.Node, selfClosing bool, rest []byte, err error) {
 	text = skipSpace(text[1:])
-	elemS, elemA, text := nextIdent(text)
+	elemS, elemA, text := p.nextIdent(text)
 	if elemS == "" {
 		return nil, false, nil, fmt.Errorf("Unexpected %q in opening tag", text[0])
 	}
@@ -194,7 +195,7 @@ func (p *parser) parseStartTag(text []byte) (node *html.Node, selfClosing bool, 
 	for text[0] != '/' && text[0] != '>' {
 		var name, val string
 		// Name
-		name, _, text = nextIdent(text)
+		name, _, text = p.nextIdent(text)
 		if name == "" {
 			return nil, false, nil, fmt.Errorf("Unexpected %q in opening %q tag", text[0], node.Data)
 		}
@@ -203,7 +204,7 @@ func (p *parser) parseStartTag(text []byte) (node *html.Node, selfClosing bool, 
 		text = skipSpace(text)
 		if text[0] == '=' {
 			text = skipSpace(text[1:])
-			val, text = nextValue(text)
+			val, text = p.nextValue(text)
 		}
 		text = skipSpace(text)
 
@@ -232,7 +233,7 @@ func (p *parser) parseStartTag(text []byte) (node *html.Node, selfClosing bool, 
 
 func (p *parser) parseEndTag(start *html.Node, text []byte) (ok bool, rest []byte, err error) {
 	text = text[2:]
-	elemS, elemA, text := nextIdent(text)
+	elemS, elemA, text := p.nextIdent(text)
 	if elemS == "" {
 		return false, nil, fmt.Errorf("Unexpected %q in closing tag", text[0])
 	}
@@ -264,32 +265,45 @@ func skipSpace(text []byte) []byte {
 	return bytes.TrimLeftFunc(text, whitespaceF)
 }
 
-func nextIdent(text []byte) (string, atom.Atom, []byte) {
+// asciiLower returns a copy of text with all uppercase ascii letters converted to lowercase.
+// The returned slice is only valid until the next call to asciiLower.
+func (p *parser) asciiLower(text []byte) []byte {
+	if cap(p.lowerBuf) < len(text) {
+		n := 2 * cap(p.lowerBuf)
+		if n < len(text) {
+			n = len(text)
+		}
+		p.lowerBuf = make([]byte, n)
+	}
+	p.lowerBuf = p.lowerBuf[:len(text)]
+
+	for i, ch := range text {
+		if 'A' <= ch && ch <= 'Z' {
+			p.lowerBuf[i] = ch | 0x20
+		} else {
+			p.lowerBuf[i] = ch
+		}
+	}
+	return p.lowerBuf
+}
+
+func (p *parser) nextIdent(text []byte) (string, atom.Atom, []byte) {
 	idx := bytes.IndexFunc(text, identInvalidF)
 	identB, text := text[:idx], text[idx:]
 	if len(identB) == 0 {
 		return "", 0, text
 	}
 
-	// Convert to lower case
-	identL := make([]byte, len(identB))
-	for i, ch := range identB {
-		if 'A' <= ch && ch <= 'Z' {
-			identL[i] = ch | 0x20
-		} else {
-			identL[i] = ch
-		}
-	}
-
-	identA := atom.Lookup(identL)
+	identB = p.asciiLower(identB)
+	identA := atom.Lookup(identB)
 	identS := identA.String()
 	if identA == 0 {
-		identS = string(identL)
+		identS = string(identB)
 	}
 	return identS, identA, text
 }
 
-func nextValue(text []byte) (string, []byte) {
+func (p *parser) nextValue(text []byte) (string, []byte) {
 	if text[0] == '\'' || text[0] == '"' {
 		delim, text := text[0], text[1:]
 		idx := bytes.IndexByte(text, delim)
