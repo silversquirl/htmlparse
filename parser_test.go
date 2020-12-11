@@ -2,6 +2,10 @@ package html
 
 import (
 	"bytes"
+	"io/ioutil"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/net/html"
@@ -90,4 +94,55 @@ func TestDoctype(t *testing.T) {
 	testParseRen(t, `<!DOCTYPE html>`, "")
 	testParseRen(t, `<!doctype html>`, `<!DOCTYPE html>`)
 	testParseRen(t, `<!doctype html "foo bar">`, `<!DOCTYPE html "foo bar">`)
+}
+
+// Benchmarks
+func benchmarkParser(b *testing.B, fun func(b *testing.B, source []byte)) {
+	b.Helper()
+	files, err := filepath.Glob("testdata/*.html")
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	for _, filename := range files {
+		f, err := os.Open(filename)
+		if err != nil {
+			b.Error(err)
+			continue
+		}
+
+		source, err := ioutil.ReadAll(f)
+		f.Close()
+		if err != nil {
+			b.Error(err)
+			continue
+		}
+
+		name := strings.TrimSuffix(filepath.Base(filename), ".html")
+		b.Run(name, func(b *testing.B) {
+			fun(b, source)
+		})
+	}
+
+}
+
+func BenchmarkVktec(b *testing.B) {
+	benchmarkParser(b, func(b *testing.B, source []byte) {
+		for i := 0; i < b.N; i++ {
+			node := &html.Node{Type: html.DocumentNode}
+			if err := Parse(node, source); err != nil {
+				b.Error(err)
+			}
+		}
+	})
+}
+func BenchmarkXNet(b *testing.B) {
+	benchmarkParser(b, func(b *testing.B, source []byte) {
+		for i := 0; i < b.N; i++ {
+			r := bytes.NewReader(source)
+			if _, err := html.Parse(r); err != nil {
+				b.Error(err)
+			}
+		}
+	})
 }
