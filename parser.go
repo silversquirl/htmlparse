@@ -238,29 +238,41 @@ func parseEndTag(start *html.Node, text []byte) (ok bool, rest []byte, err error
 	return true, text, nil
 }
 
-const (
-	wspc = " \t\n\f\r" // Whitespace characters
-
-	identInvalid  = wspc + "\000\"'>/="  // Characters that are invalid in identifiers
-	unquotInvalid = wspc + "\000\"'=<>`" // Characters that are invalid in unquoted values
-)
+func whitespaceF(r rune) bool {
+	return r == ' ' || r == '\t' || r == '\n' || r == '\f' || r == '\r'
+}
+func identInvalidF(r rune) bool {
+	return whitespaceF(r) || r == 0 || r == '"' || r == '\'' || r == '=' || r == '/' || r == '>'
+}
+func unquotInvalidF(r rune) bool {
+	return whitespaceF(r) || r == 0 || r == '"' || r == '\'' || r == '=' || r == '<' || r == '>'
+}
 
 func skipSpace(text []byte) []byte {
-	return bytes.TrimLeft(text, wspc)
+	return bytes.TrimLeftFunc(text, whitespaceF)
 }
 
 func nextIdent(text []byte) (string, atom.Atom, []byte) {
-	idx := bytes.IndexAny(text, identInvalid)
+	idx := bytes.IndexFunc(text, identInvalidF)
 	identB, text := text[:idx], text[idx:]
 	if len(identB) == 0 {
 		return "", 0, text
 	}
 
-	identB = bytes.ToLower(identB)
-	identA := atom.Lookup(identB)
+	// Convert to lower case
+	identL := make([]byte, len(identB))
+	for i, ch := range identB {
+		if 'A' <= ch && ch <= 'Z' {
+			identL[i] = ch | 0x20
+		} else {
+			identL[i] = ch
+		}
+	}
+
+	identA := atom.Lookup(identL)
 	identS := identA.String()
 	if identA == 0 {
-		identS = string(identB)
+		identS = string(identL)
 	}
 	return identS, identA, text
 }
@@ -271,7 +283,7 @@ func nextValue(text []byte) (string, []byte) {
 		idx := bytes.IndexByte(text, delim)
 		return string(text[:idx]), text[idx+1:]
 	} else {
-		idx := bytes.IndexAny(text, unquotInvalid)
+		idx := bytes.IndexFunc(text, unquotInvalidF)
 		return string(text[:idx]), text[idx:]
 	}
 }
