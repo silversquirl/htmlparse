@@ -80,6 +80,33 @@ func parse(parent *html.Node, text []byte, root bool) (rest []byte, err error) {
 			} else {
 				return nil, fmt.Errorf("Unclosed %q element", parent.Data)
 			}
+
+		case '!':
+			text = text[2:]
+			if len(text) == 0 {
+				return nil, errors.New("Unexpected end of file in comment tag")
+			}
+			node := &html.Node{Type: html.CommentNode}
+			if bytes.HasPrefix(text, []byte("--")) {
+				// Well-formed comment
+				text = text[2:]
+				idx = bytes.Index(text, []byte("-->"))
+				node.Data, text = string(text[:idx]), text[idx+3:]
+			} else {
+				doctype, _, rest := nextIdent(text)
+				if doctype == "doctype" {
+					// DOCTYPE
+					text = skipSpace(rest)
+					idx = bytes.IndexByte(text, '>')
+					node.Type = html.DoctypeNode
+					node.Data, text = string(text[:idx]), text[idx+1:]
+				} else {
+					// Malformed comment
+					idx = bytes.IndexByte(text, '>')
+					node.Data, text = string(text[:idx]), text[idx+1:]
+				}
+			}
+			parent.AppendChild(node)
 		}
 	}
 

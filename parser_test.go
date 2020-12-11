@@ -76,3 +76,18 @@ func TestEscapableRawText(t *testing.T) {
 	testParseRen(t, `<textarea>a<B>"c&quot;</textarea>`, `<textarea>a&lt;B&gt;&#34;c&#34;</textarea>`)
 	testParseRen(t, `<title>a<B>'c&apos;</title>`, `<title>a&lt;B&gt;&#39;c&#39;</title>`)
 }
+
+func TestComment(t *testing.T) {
+	testParseRen(t, `<!--foobar->-->`, "")
+	testParseRen(t, `<!-- hello world <!-->`, "")
+}
+
+func TestMalformedComment(t *testing.T) {
+	testParseRen(t, `<![CDATA[hello world]]>`, `<!--[CDATA[hello world]]-->`)
+}
+
+func TestDoctype(t *testing.T) {
+	testParseRen(t, `<!DOCTYPE html>`, "")
+	testParseRen(t, `<!doctype html>`, `<!DOCTYPE html>`)
+	testParseRen(t, `<!doctype html "foo bar">`, `<!DOCTYPE html "foo bar">`)
+}
