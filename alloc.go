@@ -1,7 +1,7 @@
 // This file contains a custom allocator designed to reduce GC strain when freeing node trees
 // Memory is allocated as a large block of sequential nodes, reducing the number of objects that need to be scanned
 
-package html
+package htmlparse
 
 import "golang.org/x/net/html"
 

@@ -1,4 +1,4 @@
-module github.com/vktec/html
+module github.com/vktec/htmlparse
 
 go 1.15
 
