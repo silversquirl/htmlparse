@@ -1,4 +1,4 @@
-# html
+# htmlparse
 
 This package aims to parse HTML very quickly, at the cost of not being entirely spec-compliant.
 The parse tree it generates will roughly match the input HTML file, rather than being rearranged according to spec.
