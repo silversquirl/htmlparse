@@ -9,6 +9,13 @@ The output uses [`*golang.org/x/net/html.Node`][node], allowing use of that pack
 [node]: https://pkg.go.dev/golang.org/x/net/html#Node
 [vdom]: https://github.com/vktec/vdom
 
+## Performance
+
+In my [testing], `htmlparse` outperforms `golang.org/x/net/html` by roughly a factor of 2.
+Care is taken to avoid expensive standard library functions and to reduce the number of allocations wherever possible.
+
+[testing]: https://github.com/vktec/htmlparse/blob/master/parser_test.go#L129
+
 ## Nonconformance
 
 A very incomplete list of nonconforming things about this parser:
